@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from math import *
 import matplotlib.animation as anim
 from shapely.geometry import *
+import copy
 
 height = 100
 width = 100
@@ -21,6 +22,12 @@ goalpoly = Polygon(goalcoords)
 wallpoly = [Polygon(wallco1),Polygon(wallco2)]
 #col = 'b' #default color
 
+FinalReach = []
+FinalDie = []
+FinalRunOut = []
+FinalEnd = []
+FinalFitness = []
+
 class Brain:
     def __init__(self,size):
         self.step = 0
@@ -33,16 +40,50 @@ class Brain:
             self.directions[i][1] = sin(randomAngle)
         #print self.directions
 
+    def mutate(self,mode='random',slewrate=0.5,signrate=0.5): #slewrate: deviation in % on the selected gene, signrate: sign flip rate of the derived direction
+        mutationRate = 0.01 #1% chance of mutation
+        for i in xrange(self.size):
+            if mode=='random':
+                if np.random.random()<mutationRate:
+                    randomAngle = np.random.random()*2*pi
+                    self.directions[i][0] = cos(randomAngle)
+                    self.directions[i][1] = sin(randomAngle)
+            if mode == 'slow':
+                val = np.random.random()
+                if val < 0.5 :
+                    dev = np.random.random()*2*slewrate-slewrate #+/- slewrate
+                    ax = 1.1
+                    while ax*ax > 1.0:
+                        ax = dev+self.directions[i][0]
+                    ay = sqrt(1-ax*ax)
+                    if np.random.random() <= signrate:
+                        ay *= -1.0
+                    self.directions[i][0]=ax
+                    self.directions[i][1]=ay
+                else:
+                    dev = np.random.random()*2*slewrate-slewrate #+/- slewrate
+                    ax = 1.1
+                    while ax*ax > 1.0:
+                        ax = dev+self.directions[i][1]
+                    ay = sqrt(1-ax*ax)
+                    if np.random.random() <= signrate:
+                        ay *= -1.0
+                    self.directions[i][1]=ax
+                    self.directions[i][0]=ay
+
 class Dot:
-    def __init__(self):
-        self.brain = Brain(10)
+    def __init__(self,brain=True):
+        if brain:
+            self.brain = Brain(100)
+        else:
+            self.brain = None
         self.dead = False
         self.reachedGoal = False
         self.runOut = False
         self.pos = np.zeros((2),dtype=np.float)
         self.vel = np.zeros((2),dtype=np.float)
         self.acc = np.zeros((2),dtype=np.float)
-        self.pos += (height/2.,10)
+        self.pos += (height/2.+np.random.random()*4,10+np.random.random()*4)
     def move(self):
         if self.dead or self.reachedGoal or self.runOut:
             #print "Dead"
@@ -70,36 +111,101 @@ class Dot:
             self.pos = pos
     
     def calcFitness(self):
-        self.fitness = 1.0/np.sum((self.pos-goal)**2)
+        dx = self.pos[0]-goal[0]
+        dy = self.pos[1]-goal[1]
+        dist = dx*dx+dy*dy
+        if (dist) <= 0.0000001:
+            dist = 0.0000001
+        self.fitness = 1.0/dist
+        #print self.fitness, self.pos[0], self.pos[1],dx,dy,dist
+
+    def getBaby(self):
+        baby = Dot()
+        baby.brain = copy.deepcopy(self.brain)
+        baby.brain.step = 0 #else baby will be too grown up
+        return baby
 
 class Population:
+    step = 0
     def __init__(self,size):
         self.size = size
         self.dots = [Dot() for i in xrange(self.size)]
+        self.generation = 0
         #self.px = [d.pos[0] for d in self.dots]
         #self.py = [d.pos[1] for d in self.dots]
     def update(self):
         #self.px = []
         #self.py = []
-        for i in xrange(self.size):
-            self.dots[i].move()
+        self.step += 1
+        for z in xrange(self.size):
+            self.dots[z].move()
             #self.px.append(d.pos[0])
             #self.py.append(d.pos[1])
     def calcFitness(self):
+        for x in xrange(self.size):
+            self.dots[x].calcFitness()
+        self.calcFitnessSum()
+
+    def selectParent(self):
+        #print "In select parent: ",
+        val = np.random.random()*self.fitnessSum
+        #print val
+        runningsum = 0.
+        #print self.size
+        for j in xrange(self.size):
+            runningsum += self.dots[j].fitness
+            #print j, self.dots[j].fitness,runningsum
+            if runningsum > val :
+                return self.dots[j]
+            #else:
+                #print self.dots[j].fitness,self.dots[j].pos
+                #print runningsum, val
+                #self.none += 1
+                #return None
+            
+
+    def naturalSelection(self):
+        self.step = 0
+        self.calcFitness()
+        self.newDots = [Dot(brain=False) for x in xrange(self.size)]
+        self.none = 0
+        for il in xrange(self.size):
+            #print "Index ",il," looking for parent:"
+            #select newborns based on parent fitness
+            parent = self.selectParent()
+            #get babies from them (low chance of mutation)
+            self.newDots[il]=parent.getBaby()
+        #print "None: ",self.none
+        self.dots = copy.deepcopy(self.newDots)
+        self.mutateBabies()
+        self.generation += 1
+
+    def calcFitnessSum(self):
+        print "Calcfitness called"
+        self.fitnessSum = 0.
         for i in xrange(self.size):
-            self.dots[i].calcFitness()
+            self.fitnessSum += self.dots[i].fitness
+        print "Total fitness: " , self.fitnessSum
+        return
+    
+
+    def mutateBabies(self):
+        for x in xrange(self.size):
+            self.dots[x].brain.mutate()
+
+
 a = Population(200)
 
-fig,ax=plt.subplots(figsize=(10,10))
+fig=plt.figure(figsize=(20,10))
 
 fig.suptitle(
     """
     Iteration: %d, Dots: %d, Step: %d, Reached: %d, Dead: %d, Runout: %d.
-    """ % (1,a.size,0,0,0,0)
+    """ % (a.generation,a.size,0,0,0,0)
 )
 
 
-#ax = fig.add_subplot(1,1,1)
+ax = fig.add_subplot(1,1,1)
 ax.set_xlim(0,height)
 ax.set_ylim(0,width)
 #ax.plot([a.pos[0]],[a.pos[1]],marker='o',ls='',markersize=2)
@@ -158,17 +264,31 @@ def update(i):
             col = 'b'
         ax.plot([a.dots[k].pos[0]],[a.dots[k].pos[1]],marker='o',ls='',markersize=2,color=col)
     if not ( dead + reached + runout == a.size ):
-        end = i
+        end = a.step
     else:
-        animstop = True
+        #animstop = True
+        end = 0
+        FinalDie.append(dead)
+        FinalReach.append(reached)
+        FinalRunOut.append(runout)
+        FinalEnd.append(a.step)
+        a.naturalSelection()
+        FinalFitness.append(a.fitnessSum)
     fig.suptitle(
     """
     Iteration: %d, Dots: %d, Step: %d, Reached: %d, Dead: %d, Runout: %d.
-    """ % (1,a.size,end,reached,dead,runout)
+    """ % (a.generation,a.size,end,reached,dead,runout)
     )
 
 px = anim.FuncAnimation(fig,update,repeat=False)
-plt.show(block=False)
-while not animstop:
-    plt.pause(1)
-plt.close()
+plt.show(block=True)
+# while not animstop:
+#     plt.pause(1)
+# plt.close()
+plt.figure()
+plt.plot(FinalDie)
+plt.plot(FinalReach)
+plt.plot(FinalRunOut)
+plt.plot(FinalEnd)
+plt.plot(FinalFitness/(50*np.max(np.array(FinalFitness))))
+plt.show()
