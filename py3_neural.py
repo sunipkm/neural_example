@@ -1,34 +1,52 @@
+#--------- Imports ----------------------------------------------------------------------------------------
 import numpy as np
 import matplotlib.pyplot as plt
-from math import *
+from math import sin,cos,pi,sqrt
 import matplotlib.animation as anim
-from shapely.geometry import *
+from shapely.geometry import Polygon,LineString,Point
 import copy
 from multiprocessing import Pool
+#----------------------------------------------------------------------------------------------------------
 
+#--------- Global Variables -------------------------------------------------------------------------------
 height = 100
 width = 100
 dt = 1
 vlim = 10
+#----------------------------------------------------------------------------------------------------------
+
+#--------- Goal Settings --------------------------------------------------------------------------------
 goal = np.array([50,96])
 goalboundx=[48,52,52,48,48]
 goalboundy=[94,94,98,98,94]
-
-wallco1 = ((0,48),(30,48),(30,52),(0,52),(0,48))
-wallco2 = ((100,48),(70,48),(70,52),(100,52),(100,48))
-
 goalcoords = ((48.,94.),(52.,94.),(52.,98.),(48.,98.),(48.,94.))
 goalpoly = Polygon(goalcoords)
+#----------------------------------------------------------------------------------------------------------
 
+#--------- Blocking walls ---------------------------------------------------------------------------------
+wallco1 = ((0,48),(30,48),(30,52),(0,52),(0,48))
+wallco2 = ((100,48),(70,48),(70,52),(100,52),(100,48))
 wallpoly = [Polygon(wallco1),Polygon(wallco2)]
+#----------------------------------------------------------------------------------------------------------
+
+#--------- Boundary Lines ------------------------------------------------------------------------------
+bound1 = LineString([(0,0),(100,0)])
+bound2 = LineString([(0,0),(0,100)])
+bound3 = LineString([(100,0),(100,100)])
+bound4 = LineString([(0,100),(100,100)])
+bounds = [bound1,bound2,bound3,bound4]
+#----------------------------------------------------------------------------------------------------------
 #col = 'b' #default color
 
+#--------- Statistics -------------------------------------------------------------------------------------
 FinalReach = []
 FinalDie = []
 FinalRunOut = []
 FinalEnd = []
 FinalFitness = []
+#----------------------------------------------------------------------------------------------------------
 
+#--------- Gene pool of particles -------------------------------------------------------------------------
 class Brain:
     def __init__(self,size):
         self.step = 0
@@ -71,11 +89,13 @@ class Brain:
                         ay *= -1.0
                     self.directions[i][1]=ax
                     self.directions[i][0]=ay
+#----------------------------------------------------------------------------------------------------------
 
+#--------- Particles --------------------------------------------------------------------------------------
 class Dot:
-    def __init__(self,brain=True):
+    def __init__(self,brain=True,brainsize=100):
         if brain:
-            self.brain = Brain(100)
+            self.brain = Brain(brainsize)
         else:
             self.brain = None
         self.dead = False
@@ -84,7 +104,9 @@ class Dot:
         self.pos = np.zeros((2),dtype=np.float)
         self.vel = np.zeros((2),dtype=np.float)
         self.acc = np.zeros((2),dtype=np.float)
-        self.pos += (height/2.+np.random.random()*4,10+np.random.random()*4)
+        self.pos += (height/2.#+np.random.random()*4
+        ,10#+np.random.random()*4
+        )
     def move(self):
         if self.dead or self.reachedGoal or self.runOut:
             #print "Dead"
@@ -101,36 +123,60 @@ class Dot:
         pos=self.pos+self.vel*dt*0.5
         # if goal[0]-2<pos[0]<goal[0]+2 and goal[1]-2<pos[1]<goal[1]+2:
         #     self.reachedGoal = True
-        if goalpoly.contains(Point(pos[0],pos[1])):
+        path = LineString([(self.pos[0],self.pos[1]),(pos[0],pos[1])])
+        # if goalpoly.contains(Point(pos[0],pos[1])):
+        #     self.reachedGoal = True
+        #     self.pos = pos
+        if path.intersects(goalpoly):
             self.reachedGoal = True
+            #intersect = path.intersection(goalpoly)
+            self.pos = goal
         for wall in wallpoly:
-            if wall.contains(Point(pos[0],pos[1])):
+            if path.intersects(wall):
                 self.dead = True
+                intersect = path.intersection(wall)
+                pos = np.array(intersect.coords[0])
+                self.pos = pos
+        for bound in bounds:
+            if path.intersects(bound):
+                self.dead = True
+                intersect = path.intersection(bound)
+                self.pos=np.array([intersect.x,intersect.y])
         if not (0<pos[0]<=height and 0<pos[1]<=width):
             self.dead = True
         if not self.dead :
-            self.pos = pos
+            if not self.reachedGoal:
+                self.pos = pos
     
     def calcFitness(self):
-        dx = self.pos[0]-goal[0]
-        dy = self.pos[1]-goal[1]
-        dist = dx*dx+dy*dy
-        if (dist) <= 0.0000001:
-            dist = 0.0000001
-        self.fitness = 1.0/dist
+        if not self.reachedGoal:
+            dx = self.pos[0]-goal[0]
+            dy = self.pos[1]-goal[1]
+            dist = dx*dx+dy*dy
+            if dist > 16.:
+                self.fitness = 1.0/16.0
+            else:
+                self.fitness = 1./dist
         #print self.fitness, self.pos[0], self.pos[1],dx,dy,dist
+        else:
+            self.fitness = 1./16. + 2500./(self.brain.step*self.brain.step)
 
     def getBaby(self):
         baby = Dot()
         baby.brain = copy.deepcopy(self.brain)
         baby.brain.step = 0 #else baby will be too grown up
         return baby
+#----------------------------------------------------------------------------------------------------------
 
+#--------- Population Class -------------------------------------------------------------------------------
 class Population:
     step = 0
-    def __init__(self,size):
+    maxstep = 100
+    def __init__(self,size,maxstep=100):
         self.size = size
-        self.dots = [Dot() for i in range(self.size)]
+        self.maxstep = maxstep
+        self.bestIndex = size
+        self.dots = [Dot(brainsize=maxstep) for i in range(self.size)]
         self.generation = 0
         #self.px = [d.pos[0] for d in self.dots]
         #self.py = [d.pos[1] for d in self.dots]
@@ -139,12 +185,31 @@ class Population:
         #self.py = []
         self.step += 1
         for z in range(self.size):
-            self.dots[z].move()
+            if(self.step<self.maxstep):
+                self.dots[z].move()
+            else:
+                self.dots[z].runOut = True
             #self.px.append(d.pos[0])
             #self.py.append(d.pos[1])
     def calcFitness(self):
+        # #maxstep = self.maxstep
+        # fitness = 0
+        # bestIndex = -1
         for x in range(self.size):
+            # if self.dots[x].reachedGoal:
+            #     if self.dots[x].brain.step < maxstep:
+            #         maxstep = self.dots[x].brain.step
+
             self.dots[x].calcFitness()
+            # if self.dots[x].fitness>fitness:
+            #     fitness = self.dots[x].fitness
+            #     bestIndex = x
+        # self.maxstep = maxstep
+        # if bestIndex >= 0 :
+        #     self.bestIndex = bestIndex
+        # else:
+        #     self.bestIndex = self.size
+        
         self.calcFitnessSum()
 
     def selectParent(self):
@@ -187,20 +252,25 @@ class Population:
         for i in range(self.size):
             self.fitnessSum += self.dots[i].fitness
         #print "Total fitness: " , self.fitnessSum
-        return
-    
+        return   
 
     def mutateBabies(self):
         for x in range(self.size):
+            # if x != self.bestIndex:
             self.dots[x].brain.mutate()
+#----------------------------------------------------------------------------------------------------------
 
+#--------- Parallelization Help ---------------------------------------------------------------------
 def dot_update(d):
     d.move()
     return d
+#----------------------------------------------------------------------------------------------------------
 
-a = Population(200)
+#--------- Begin MAIN -------------------------------------------------------------------------------------
+a = Population(200,maxstep=400)
 
-fig=plt.figure(figsize=(20,10))
+#--------- Animation Figure -------------------------------------------------------------------------------
+fig=plt.figure(figsize=(10,10))
 
 fig.suptitle(
     """
@@ -231,12 +301,15 @@ ax.set_yticks(major_ticks)
 ax.set_yticks(minor_ticks,minor=True)
 end = 0
 animstop = False
+#----------------------------------------------------------------------------------------------------------
+
+#--------- Frame Iterator ---------------------------------------------------------------------------------
 def update(i):
     global end,animstop
-    #a.update()
-    with Pool(processes=6) as pool:
-        newDots = pool.map(dot_update,a.dots,1)
-    a.dots = newDots.copy()
+    a.update()
+    # with Pool(processes=6) as pool:
+    #     newDots = pool.map(dot_update,a.dots,1)
+    # a.dots = newDots.copy()
     ax.clear()
     ax.set_xlim(0,height)
     ax.set_ylim(0,width)
@@ -292,10 +365,17 @@ plt.show(block=True)
 # while not animstop:
 #     plt.pause(1)
 # plt.close()
-plt.figure()
-plt.plot(FinalDie)
-plt.plot(FinalReach)
-plt.plot(FinalRunOut)
-plt.plot(FinalEnd)
-plt.plot(FinalFitness/(50*np.max(np.array(FinalFitness))))
+#----------------------------------------------------------------------------------------------------------
+
+#--------- Statistics Plotter -----------------------------------------------------------------------------
+FinalFitness = np.array(FinalFitness)
+plt.figure(figsize=(10,10))
+plt.plot(FinalDie,label='Deaths')
+plt.plot(FinalReach,label='Wins')
+plt.plot(FinalRunOut,label='Out of breath')
+plt.plot(FinalEnd,label='Simulation length')
+plt.plot(50*FinalFitness/(np.max(np.array(FinalFitness))),label='Normalized fitness sum')
+plt.grid()
+plt.legend()
 plt.show()
+#----------------------------------------------------------------------------------------------------------
