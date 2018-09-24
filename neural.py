@@ -35,7 +35,7 @@ class Brain:
 
 class Dot:
     def __init__(self):
-        self.brain = Brain(400)
+        self.brain = Brain(10)
         self.dead = False
         self.reachedGoal = False
         self.runOut = False
@@ -122,7 +122,7 @@ ax.set_yticks(minor_ticks,minor=True)
 end = 0
 animstop = False
 def update(i):
-    global end
+    global end,animstop
     a.update()
     ax.clear()
     ax.set_xlim(0,height)
@@ -159,6 +159,8 @@ def update(i):
         ax.plot([a.dots[k].pos[0]],[a.dots[k].pos[1]],marker='o',ls='',markersize=2,color=col)
     if not ( dead + reached + runout == a.size ):
         end = i
+    else:
+        animstop = True
     fig.suptitle(
     """
     Iteration: %d, Dots: %d, Step: %d, Reached: %d, Dead: %d, Runout: %d.
@@ -166,4 +168,7 @@ def update(i):
     )
 
 px = anim.FuncAnimation(fig,update,repeat=False)
-plt.show()
+plt.show(block=False)
+while not animstop:
+    plt.pause(1)
+plt.close()
