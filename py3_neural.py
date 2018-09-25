@@ -1,11 +1,12 @@
 #--------- Imports ----------------------------------------------------------------------------------------
 import numpy as np
 import matplotlib.pyplot as plt
-from math import sin,cos,pi,sqrt
+from math import sin,cos,pi,sqrt,exp
 import matplotlib.animation as anim
 from shapely.geometry import Polygon,LineString,Point
 import copy
 from multiprocessing import Pool
+import matplotlib.gridspec as grspec
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Global Variables -------------------------------------------------------------------------------
@@ -13,6 +14,7 @@ height = 100
 width = 100
 dt = 1
 vlim = 10
+t = 0 ; v = 1
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Goal Settings --------------------------------------------------------------------------------
@@ -39,11 +41,11 @@ bounds = [bound1,bound2,bound3,bound4]
 #col = 'b' #default color
 
 #--------- Statistics -------------------------------------------------------------------------------------
-FinalReach = []
-FinalDie = []
-FinalRunOut = []
-FinalEnd = []
-FinalFitness = []
+FinalReach = [0]
+FinalDie = [0]
+FinalRunOut = [0]
+FinalEnd = [0]
+FinalFitness =[0.001]
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Gene pool of particles -------------------------------------------------------------------------
@@ -59,8 +61,10 @@ class Brain:
             self.directions[i][1] = sin(randomAngle)
         #print self.directions
 
-    def mutate(self,mode='random',slewrate=0.5,signrate=0.5): #slewrate: deviation in % on the selected gene, signrate: sign flip rate of the derived direction
-        mutationRate = 0.01 #1% chance of mutation
+    def mutate(self,mutRate = 0.01,mode='random',slewrate=0.5,signrate=0.5): #slewrate: deviation in % on the selected gene, signrate: sign flip rate of the derived direction
+        mutationRate = mutRate #1% chance of mutation
+        if mutationRate == 0:
+            return
         for i in range(self.size):
             if mode=='random':
                 if np.random.random()<mutationRate:
@@ -107,6 +111,7 @@ class Dot:
         self.pos += (height/2.#+np.random.random()*4
         ,10#+np.random.random()*4
         )
+        self.bestDot = False
     def move(self):
         if self.dead or self.reachedGoal or self.runOut:
             #print "Dead"
@@ -152,14 +157,15 @@ class Dot:
         if not self.reachedGoal:
             dx = self.pos[0]-goal[0]
             dy = self.pos[1]-goal[1]
-            dist = dx*dx+dy*dy
-            if dist > 16.:
-                self.fitness = 1.0/16.0
+            dist = (dx*dx+dy*dy)
+            #print(dist)
+            if dist < 16.:
+                self.fitness = 1./16.
             else:
                 self.fitness = 1./dist
-        #print self.fitness, self.pos[0], self.pos[1],dx,dy,dist
         else:
-            self.fitness = 1./16. + 2500./(self.brain.step*self.brain.step)
+            self.fitness = 1./16. + 10000./(self.brain.step*self.brain.step)
+        #print(self.fitness)
 
     def getBaby(self):
         baby = Dot()
@@ -191,7 +197,7 @@ class Population:
                 self.dots[z].runOut = True
             #self.px.append(d.pos[0])
             #self.py.append(d.pos[1])
-    def calcFitness(self):
+    def calcFitness(self,calcSum=True,setBestDot=False):
         # #maxstep = self.maxstep
         # fitness = 0
         # bestIndex = -1
@@ -209,8 +215,25 @@ class Population:
         #     self.bestIndex = bestIndex
         # else:
         #     self.bestIndex = self.size
-        
-        self.calcFitnessSum()
+        if calcSum:
+            self.calcFitnessSum()
+
+        if setBestDot:
+            self.setBestDot()
+
+    def setBestDot(self):
+        max = 0
+        maxIndex = 0
+        for i in range(self.size):
+            if self.dots[i].fitness > max:
+                max = self.dots[i].fitness
+                maxIndex = i
+
+        if self.dots[maxIndex].reachedGoal:
+            self.dots[maxIndex].bestDot = True
+            self.maxstep = self.dots[maxIndex].brain.step
+
+        return
 
     def selectParent(self):
         #print "In select parent: ",
@@ -256,8 +279,11 @@ class Population:
 
     def mutateBabies(self):
         for x in range(self.size):
-            # if x != self.bestIndex:
-            self.dots[x].brain.mutate()
+            if self.dots[x].bestDot:
+                self.dots[x].brain.mutate(mutRate=0.0)
+            else:
+                self.dots[x].brain.mutate()
+            self.dots[x].bestDot = False
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Parallelization Help ---------------------------------------------------------------------
@@ -270,7 +296,7 @@ def dot_update(d):
 a = Population(200,maxstep=400)
 
 #--------- Animation Figure -------------------------------------------------------------------------------
-fig=plt.figure(figsize=(10,10))
+fig=plt.figure(figsize=(20,10))
 
 fig.suptitle(
     """
@@ -278,8 +304,16 @@ fig.suptitle(
     """ % (a.generation,a.size,0,0,0,0)
 )
 
+outer = grspec.GridSpec(2,2,wspace=0.1,hspace=0.1)
 
-ax = fig.add_subplot(1,1,1)
+ax = plt.subplot(outer[:,0])
+ax1 = plt.subplot(outer[0,1])
+ax2 = plt.subplot(outer[1,1])
+
+ax1_xlim = 10
+
+# ax = fig.add_subplot(121)
+# ax1 = fig.add_subplot(122)
 ax.set_xlim(0,height)
 ax.set_ylim(0,width)
 #ax.plot([a.pos[0]],[a.pos[1]],marker='o',ls='',markersize=2)
@@ -305,11 +339,34 @@ animstop = False
 
 #--------- Frame Iterator ---------------------------------------------------------------------------------
 def update(i):
-    global end,animstop
+    global end,animstop,ax1_xlim,t,v
     a.update()
+    a.calcFitness(calcSum=False)
     # with Pool(processes=6) as pool:
     #     newDots = pool.map(dot_update,a.dots,1)
     # a.dots = newDots.copy()
+    ax1.clear()
+    if v > 0 :
+        if ax1_xlim < len(FinalDie):
+            ax1_xlim += 10
+        ax1.set_xlim(1,ax1_xlim)
+        ax1.plot([x for x in range(v)],FinalDie,label='Deaths')
+        ax1.plot([x for x in range(v)],FinalReach,label='Wins')
+        ax1.plot([x for x in range(v)],FinalRunOut,label='Out of breath')
+        ax1.plot([x for x in range(v)],FinalEnd,label='Simulation length')
+        #print(len(FinalFitness))
+        fnftns = np.array(FinalFitness)
+        fnftns = fnftns/np.max(fnftns)
+
+        ax1.plot([x for x in range(v)],20*fnftns,label='Normalized fitness sum')
+        ax1.legend()
+        #print(FinalFitness)
+    ax1.grid()
+    ftns = np.array([a.dots[x].fitness for x in range(len(a.dots))])
+    ax2.clear()
+    ax2.plot(ftns/np.max(ftns),ls='',marker='o')
+    ax2.grid()
+
     ax.clear()
     ax.set_xlim(0,height)
     ax.set_ylim(0,width)
@@ -354,28 +411,31 @@ def update(i):
         FinalEnd.append(a.step)
         a.naturalSelection()
         FinalFitness.append(a.fitnessSum)
+        v += 1
     fig.suptitle(
     """
     Iteration: %d, Dots: %d, Step: %d, Reached: %d, Dead: %d, Runout: %d.
     """ % (a.generation,a.size,end,reached,dead,runout)
     )
+    t += dt
 
 px = anim.FuncAnimation(fig,update,repeat=False)
-plt.show(block=True)
+#plt.show(block=True)
+plt.show()
 # while not animstop:
 #     plt.pause(1)
 # plt.close()
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Statistics Plotter -----------------------------------------------------------------------------
-FinalFitness = np.array(FinalFitness)
-plt.figure(figsize=(10,10))
-plt.plot(FinalDie,label='Deaths')
-plt.plot(FinalReach,label='Wins')
-plt.plot(FinalRunOut,label='Out of breath')
-plt.plot(FinalEnd,label='Simulation length')
-plt.plot(50*FinalFitness/(np.max(np.array(FinalFitness))),label='Normalized fitness sum')
-plt.grid()
-plt.legend()
-plt.show()
+# FinalFitness = np.array(FinalFitness)
+# plt.figure(figsize=(10,10))
+# plt.plot(FinalDie,label='Deaths')
+# plt.plot(FinalReach,label='Wins')
+# plt.plot(FinalRunOut,label='Out of breath')
+# plt.plot(FinalEnd,label='Simulation length')
+# plt.plot(50*FinalFitness/(np.max(np.array(FinalFitness))),label='Normalized fitness sum')
+# plt.grid()
+# plt.legend()
+# plt.show()
 #----------------------------------------------------------------------------------------------------------
