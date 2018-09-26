@@ -15,6 +15,7 @@ width = 100
 dt = 1
 vlim = 10
 t = 0 ; v = 1
+wall_right = True
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Goal Settings --------------------------------------------------------------------------------
@@ -25,13 +26,58 @@ goalcoords = ((48.,94.),(52.,94.),(52.,98.),(48.,98.),(48.,94.))
 goalpoly = Polygon(goalcoords)
 #----------------------------------------------------------------------------------------------------------
 
-#--------- Blocking walls ---------------------------------------------------------------------------------
-wallco1 = ((0,48),(30,48),(30,52),(0,52),(0,48))
-wallco2 = ((100,48),(70,48),(70,52),(100,52),(100,48))
-wallpoly = [Polygon(wallco1),Polygon(wallco2)]
+#--------- Wall Datatype ----------------------------------------------------------------------------------
+"""
+List: Wall:[[origin x, origin y],width,height]
+"""
 #----------------------------------------------------------------------------------------------------------
 
-#--------- Boundary Lines ------------------------------------------------------------------------------
+#--------- Blocking walls ---------------------------------------------------------------------------------
+# wallco1 = ((0,48-10),(30,48-10),(30,52-10),(0,52-10),(0,4810))
+# wallco2 = ((100,48+20),(70,48+20),(70,52+20),(100,52+20),(100,48+20))
+# wallpoly = [Polygon(wallco1),Polygon(wallco2)]
+# wallcol1 = []
+# for wx in wallco1:
+#     wallcol1.append(list(wx))
+# wallcol2 = []
+# for wx in wallco2:
+#     wallcol2.append(list(wx))
+# wallpoly = [(wallcol1),(wallcol2)]
+
+wallco1 = [[15,41],15,2,1]
+wallco2 = [[85,71],15,2,-1]
+wallpoly = [wallco1,wallco2]
+#----------------------------------------------------------------------------------------------------------
+
+#--------- Moving Walls -----------------------------------------------------------------------------------
+def move_wall(w_coord,w_num=10):
+    __doc__ = """
+              move_wall:
+              1. w_coord: List of the format [[origin x, origin y],width,height,direction]
+              2. t (default: 0): Time to position the dot, defaults to 0 for non-moving wall
+              3. w_num: Sets direction (and velocity) of individual walls  
+              """
+    global width
+    rx = w_coord[0][0]+w_coord[1]+w_coord[3]*w_num
+    #print(rx)
+    lx = w_coord[0][0]-w_coord[1]+w_coord[3]*w_num
+    #print(lx)
+    if rx > width or lx < 0:
+        #print("in loop")
+        w_coord[3]*=-1
+        rx = w_coord[0][0]+w_coord[1]+w_coord[3]*w_num
+        lx = w_coord[0][1]-w_coord[1]+w_coord[3]*w_num
+    w_coord[0][0] += w_coord[3]*w_num
+    x=w_coord[0][0];y=w_coord[0][1]
+
+    w=[[x-w_coord[1],y-w_coord[2]],[x+w_coord[1],y-w_coord[2]],[x+w_coord[1],y+w_coord[2]],[x-w_coord[1],y+w_coord[2],[x-w_coord[1],y-w_coord[2]]]]
+    #print(w)
+    wall = Polygon(w)
+    #print(w_coord)
+    return w_coord,wall
+#----------------------------------------------------------------------------------------------------------
+
+#--------- Boundary Lines ---------------------------------------------------------------------------------
 bound1 = LineString([(0,0),(100,0)])
 bound2 = LineString([(0,0),(0,100)])
 bound3 = LineString([(100,0),(100,100)])
@@ -62,6 +108,8 @@ class Brain:
         #print self.directions
 
     def mutate(self,mutRate = 0.01,mode='random',slewrate=0.5,signrate=0.5): #slewrate: deviation in % on the selected gene, signrate: sign flip rate of the derived direction
+        # if mode == 'slow':
+        #     print("Starting slow")
         mutationRate = mutRate #1% chance of mutation
         if mutationRate == 0:
             return
@@ -78,6 +126,7 @@ class Brain:
                     ax = 1.1
                     while ax*ax > 1.0:
                         ax = dev+self.directions[i][0]
+                        dev = np.random.random()*2*slewrate-slewrate
                     ay = sqrt(1-ax*ax)
                     if np.random.random() <= signrate:
                         ay *= -1.0
@@ -88,11 +137,15 @@ class Brain:
                     ax = 1.1
                     while ax*ax > 1.0:
                         ax = dev+self.directions[i][1]
+                        dev = np.random.random()*2*slewrate-slewrate
                     ay = sqrt(1-ax*ax)
                     if np.random.random() <= signrate:
                         ay *= -1.0
                     self.directions[i][1]=ax
                     self.directions[i][0]=ay
+        # if mode == 'slow' :
+        #     print("End slow")
+        
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Particles --------------------------------------------------------------------------------------
@@ -112,7 +165,7 @@ class Dot:
         ,10#+np.random.random()*4
         )
         self.bestDot = False
-    def move(self):
+    def move(self,wallpoly):
         if self.dead or self.reachedGoal or self.runOut:
             #print "Dead"
             return
@@ -164,7 +217,7 @@ class Dot:
             else:
                 self.fitness = 1./dist
         else:
-            self.fitness = 1./16. + 10000./(self.brain.step*self.brain.step)
+            self.fitness = 1./16. + 100000./(self.brain.step*self.brain.step)
         #print(self.fitness)
 
     def getBaby(self):
@@ -186,13 +239,13 @@ class Population:
         self.generation = 0
         #self.px = [d.pos[0] for d in self.dots]
         #self.py = [d.pos[1] for d in self.dots]
-    def update(self):
+    def update(self,wallpoly):
         #self.px = []
         #self.py = []
         self.step += 1
         for z in range(self.size):
             if(self.step<self.maxstep):
-                self.dots[z].move()
+                self.dots[z].move(wallpoly)
             else:
                 self.dots[z].runOut = True
             #self.px.append(d.pos[0])
@@ -254,6 +307,8 @@ class Population:
             
 
     def naturalSelection(self):
+        global t, wallpoly, wallco1, wallco2
+        t = 0; wallpoly=[wallco1,wallco2]
         self.step = 0
         self.calcFitness()
         self.newDots = [Dot(brain=False) for x in range(self.size)]
@@ -266,6 +321,7 @@ class Population:
             self.newDots[il]=parent.getBaby()
         #print "None: ",self.none
         self.dots = copy.deepcopy(self.newDots)
+        del self.newDots
         self.mutateBabies()
         self.generation += 1
 
@@ -304,11 +360,17 @@ fig.suptitle(
     """ % (a.generation,a.size,0,0,0,0)
 )
 
-outer = grspec.GridSpec(2,2,wspace=0.1,hspace=0.1)
+outer = grspec.GridSpec(2,2,wspace=0.3,hspace=0.3)
 
-ax = plt.subplot(outer[:,0])
+ax = plt.subplot(outer[:,0],adjustable='box',aspect=1.0)
+ax.set_title('Particle Trajectories')
 ax1 = plt.subplot(outer[0,1])
+ax1.set_title('Statistics')
+ax1.set_xlabel('Iterations')
 ax2 = plt.subplot(outer[1,1])
+ax2.set_title('Probabilities')
+ax2.set_xlabel('Particle ID')
+ax2.set_ylabel('Normalized Fitness')
 
 ax1_xlim = 10
 
@@ -323,7 +385,9 @@ for i in range(a.size):
 
 ax.plot(goalboundx,goalboundy,color='g')
 for wall in wallpoly:
-    wx,wy=wall.exterior.xy
+    w2,wpy=(move_wall(wall,w_num=0))
+    wall = w2
+    wx,wy=wpy.exterior.xy
     ax.plot(wx,wy,color='r')
 
 
@@ -333,6 +397,7 @@ ax.set_xticks(major_ticks)
 ax.set_xticks(minor_ticks,minor=True)
 ax.set_yticks(major_ticks)
 ax.set_yticks(minor_ticks,minor=True)
+ax.grid(which='both')
 end = 0
 animstop = False
 #----------------------------------------------------------------------------------------------------------
@@ -340,12 +405,56 @@ animstop = False
 #--------- Frame Iterator ---------------------------------------------------------------------------------
 def update(i):
     global end,animstop,ax1_xlim,t,v
-    a.update()
-    a.calcFitness(calcSum=False)
     # with Pool(processes=6) as pool:
     #     newDots = pool.map(dot_update,a.dots,1)
     # a.dots = newDots.copy()
+
+    ax.clear()
+    ax.set_title('Particle Trajectories')
+    ax.set_xlim(0,height)
+    ax.set_ylim(0,width)
+    major_ticks = np.arange(0,101,10)
+    minor_ticks = np.arange(0,101,1)
+    ax.set_xticks(major_ticks)
+    ax.set_xticks(minor_ticks,minor=True)
+    ax.set_yticks(major_ticks)
+    ax.set_yticks(minor_ticks,minor=True)
+    ax.grid(which='minor')
+    #print a.pos
+    #ax.scatter([goal[0]],[goal[1]],marker='s',color='g',s=81*(fig.dpi/72.))
+    #ax.plot([a.pos[0]],[a.pos[1]],marker='o',ls='',markersize=2)
+    ax.plot(goalboundx,goalboundy,color='g')
+    wallfeed = []
+    for wall in wallpoly:
+        w2,wpy=(move_wall(wall))
+        wall = w2
+        wallfeed.append(wpy)
+        wx,wy=wpy.exterior.xy
+        ax.plot(wx,wy,color='r')
+
+    a.update(wallfeed)
+    a.calcFitness(calcSum=False)
+    
+    dead = 0
+    reached = 0
+    runout = 0
+    for k in range(a.size):
+        if a.dots[k].reachedGoal :
+            col = 'r'
+            reached += 1
+        elif a.dots[k].runOut:
+            col = 'cyan'
+            runout += 1
+        elif a.dots[k].dead:
+            col = 'black'
+            dead += 1
+        else:
+            col = 'b'
+        ax.plot([a.dots[k].pos[0]],[a.dots[k].pos[1]],marker='o',ls='',markersize=2,color=col)
+
     ax1.clear()
+    ax1.set_title('Statistics')
+    ax1.set_xlabel('Iterations')
     if v > 0 :
         if ax1_xlim < len(FinalDie):
             ax1_xlim += 10
@@ -364,42 +473,11 @@ def update(i):
     ax1.grid()
     ftns = np.array([a.dots[x].fitness for x in range(len(a.dots))])
     ax2.clear()
-    ax2.plot(ftns/np.max(ftns),ls='',marker='o')
+    ax2.set_title('Probabilities')
+    ax2.set_xlabel('Particle ID')
+    ax2.set_ylabel('Normalized Fitness')
+    ax2.plot(ftns/np.max(ftns),ls='',marker='o',markersize=2)
     ax2.grid()
-
-    ax.clear()
-    ax.set_xlim(0,height)
-    ax.set_ylim(0,width)
-    major_ticks = np.arange(0,101,10)
-    minor_ticks = np.arange(0,101,1)
-    ax.set_xticks(major_ticks)
-    ax.set_xticks(minor_ticks,minor=True)
-    ax.set_yticks(major_ticks)
-    ax.set_yticks(minor_ticks,minor=True)
-    ax.grid(which='minor')
-    #print a.pos
-    #ax.scatter([goal[0]],[goal[1]],marker='s',color='g',s=81*(fig.dpi/72.))
-    #ax.plot([a.pos[0]],[a.pos[1]],marker='o',ls='',markersize=2)
-    ax.plot(goalboundx,goalboundy,color='g')
-    for wall in wallpoly:
-        wx,wy=wall.exterior.xy
-        ax.plot(wx,wy,color='r')
-    dead = 0
-    reached = 0
-    runout = 0
-    for k in range(a.size):
-        if a.dots[k].reachedGoal :
-            col = 'r'
-            reached += 1
-        elif a.dots[k].runOut:
-            col = 'cyan'
-            runout += 1
-        elif a.dots[k].dead:
-            col = 'black'
-            dead += 1
-        else:
-            col = 'b'
-        ax.plot([a.dots[k].pos[0]],[a.dots[k].pos[1]],marker='o',ls='',markersize=2,color=col)
     if not ( dead + reached + runout == a.size ):
         end = a.step
     else:
@@ -412,14 +490,23 @@ def update(i):
         a.naturalSelection()
         FinalFitness.append(a.fitnessSum)
         v += 1
-    fig.suptitle(
-    """
-    Iteration: %d, Dots: %d, Step: %d, Reached: %d, Dead: %d, Runout: %d.
-    """ % (a.generation,a.size,end,reached,dead,runout)
-    )
+
+    if not a.generation > 0:    
+        fig.suptitle(
+        """
+        Iteration: %d, Dots: %d, Step: %d, Reached: %d, Dead: %d, Runout: %d.
+        """ % (a.generation,a.size,end,reached,dead,runout)
+        )
+    else:
+        fig.suptitle(
+        """
+        Previous Iteration: %d, Dots: %d, Step: %d, Reached: %d, Dead: %d, Runout: %d.
+        Iteration: %d, Dots: %d, Step: %d, Reached: %d, Dead: %d, Runout: %d.
+        """ % (a.generation-1,a.size,FinalEnd[v-1],FinalReach[v-1],FinalDie[v-1],FinalRunOut[v-1],a.generation,a.size,end,reached,dead,runout)
+        )
     t += dt
 
-px = anim.FuncAnimation(fig,update,repeat=False)
+px = anim.FuncAnimation(fig,update,repeat=False,interval=100)
 #plt.show(block=True)
 plt.show()
 # while not animstop:
