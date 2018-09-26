@@ -26,12 +26,6 @@ goalcoords = ((48.,94.),(52.,94.),(52.,98.),(48.,98.),(48.,94.))
 goalpoly = Polygon(goalcoords)
 #----------------------------------------------------------------------------------------------------------
 
-#--------- Wall Datatype ----------------------------------------------------------------------------------
-"""
-List: Wall:[[origin x, origin y],width,height]
-"""
-#----------------------------------------------------------------------------------------------------------
-
 #--------- Blocking walls ---------------------------------------------------------------------------------
 # wallco1 = ((0,48-10),(30,48-10),(30,52-10),(0,52-10),(0,4810))
 # wallco2 = ((100,48+20),(70,48+20),(70,52+20),(100,52+20),(100,48+20))
@@ -51,19 +45,15 @@ wallpoly = [wallco1,wallco2]
 
 #--------- Moving Walls -----------------------------------------------------------------------------------
 def move_wall(w_coord,w_num=10):
-    __doc__ = """
-              move_wall:
-              1. w_coord: List of the format [[origin x, origin y],width,height,direction]
-              2. t (default: 0): Time to position the dot, defaults to 0 for non-moving wall
-              3. w_num: Sets direction (and velocity) of individual walls  
-              """
+    """
+    move_wall:
+        1. w_coord: List of the format [[middle of box x, middle of box y],width/2,height/2,direction]
+        2. w_num: Sets direction (and velocity) of individual walls  
+    """
     global width
     rx = w_coord[0][0]+w_coord[1]+w_coord[3]*w_num
-    #print(rx)
     lx = w_coord[0][0]-w_coord[1]+w_coord[3]*w_num
-    #print(lx)
     if rx > width or lx < 0:
-        #print("in loop")
         w_coord[3]*=-1
         rx = w_coord[0][0]+w_coord[1]+w_coord[3]*w_num
         lx = w_coord[0][1]-w_coord[1]+w_coord[3]*w_num
@@ -71,9 +61,7 @@ def move_wall(w_coord,w_num=10):
     x=w_coord[0][0];y=w_coord[0][1]
 
     w=[[x-w_coord[1],y-w_coord[2]],[x+w_coord[1],y-w_coord[2]],[x+w_coord[1],y+w_coord[2]],[x-w_coord[1],y+w_coord[2],[x-w_coord[1],y-w_coord[2]]]]
-    #print(w)
     wall = Polygon(w)
-    #print(w_coord)
     return w_coord,wall
 #----------------------------------------------------------------------------------------------------------
 
@@ -86,7 +74,7 @@ bounds = [bound1,bound2,bound3,bound4]
 #----------------------------------------------------------------------------------------------------------
 #col = 'b' #default color
 
-#--------- Statistics -------------------------------------------------------------------------------------
+#--------- Statistics Variables --------------------------------------------------------------------------
 FinalReach = [0]
 FinalDie = [0]
 FinalRunOut = [0]
@@ -96,6 +84,23 @@ FinalFitness =[0.001]
 
 #--------- Gene pool of particles -------------------------------------------------------------------------
 class Brain:
+    """
+    class Brain: Brain of the dots that basically indicate the acceleration of the dot at the n'th step
+
+    Methods:
+        1. __init__:
+            a. size: Length of the 2D acceleration array
+
+            Returns None, initializes the Brain object.
+
+        2. mutate:
+            a. mutRate: Rate of mutation (0<=mutRate<=1)
+            b. mode: Default-> 'random'
+                'random': % of brain array provided by mutRate is randomly mutated.
+                'slow': % of brain array provided by mutRate is changed according to
+                        slewrate (deviation in % from the existing value) and signrate
+                        (chance of sign flip on one of the directions).
+    """
     def __init__(self,size):
         self.step = 0
         self.directions = [np.zeros((2),dtype=np.float) for i in range(size)]
