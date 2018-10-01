@@ -38,9 +38,24 @@ goalpoly = Polygon(goalcoords)
 #     wallcol2.append(list(wx))
 # wallpoly = [(wallcol1),(wallcol2)]
 
-wallco1 = [[15,41],15,2,1]
-wallco2 = [[85,71],15,2,-1]
-wallpoly = [wallco1,wallco2]
+# wallco1 = [[15,41],15,2,1]
+# wallco2 = [[85,71],15,2,-1]
+
+def read_wall(fname):
+    mfile = np.loadtxt(fname)
+    mz = [] 
+    for x in mfile:
+        x = np.delete(x,np.s_[:2])
+        x = np.reshape((4,2))
+        coord = np.mean(x,axis=0).tolis()
+        h = np.abs(x[1][0]-x[0][0])/2
+        w = np.abs(x[2][1]-x[1][1])/2
+        mz.append([coord,h,w,0])
+
+    return mz
+        
+
+wallpoly = read_wall('maze.txt')
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Moving Walls -----------------------------------------------------------------------------------
@@ -66,10 +81,10 @@ def move_wall(w_coord,w_num=10):
 #----------------------------------------------------------------------------------------------------------
 
 #--------- Boundary Lines ---------------------------------------------------------------------------------
-bound1 = LineString([(0,0),(100,0)])
-bound2 = LineString([(0,0),(0,100)])
-bound3 = LineString([(100,0),(100,100)])
-bound4 = LineString([(0,100),(100,100)])
+bound1 = LineString([(5,5),(95,5)])
+bound2 = LineString([(5,5),(5,95)])
+bound3 = LineString([(95,5),(95,95)])
+bound4 = LineString([(5,95),(95,95)])
 bounds = [bound1,bound2,bound3,bound4]
 #----------------------------------------------------------------------------------------------------------
 #col = 'b' #default color
@@ -205,10 +220,16 @@ class Dot:
                 self.dead = True
                 intersect = path.intersection(bound)
                 self.pos=np.array([intersect.x,intersect.y])
-        if not (0<pos[0]<=height and 0<pos[1]<=width):
-            self.dead = True
         if not self.dead :
             if not self.reachedGoal:
+                if pos[0]<0:
+                    pos[0] += width
+                if pos[1]<0:
+                    pos[1] += height
+                if pos[0]>width:
+                    pos[0] -= width
+                if pos[1]>height:
+                    pos[1] -= height
                 self.pos = pos
     
     def calcFitness(self):
